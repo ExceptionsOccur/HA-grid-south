@@ -138,28 +138,30 @@ async def async_setup_entry(
                 SUFFIX_THIS_MONTH_KWH,
                 extra_state_attributes_key=ATTR_KEY_THIS_MONTH_BY_DAY,
             ),
-            # this month's total cost, with extra attributes about daily usage
-            CSGCostSensor(
-                coordinator,
-                ele_account_number,
-                SUFFIX_THIS_MONTH_COST,
-                extra_state_attributes_key=ATTR_KEY_THIS_MONTH_BY_DAY,
-            ),
-            # current ladder, with extra attributes about start date
-            CSGLadderStageSensor(
-                coordinator,
-                ele_account_number,
-                SUFFIX_CURRENT_LADDER,
-                extra_state_attributes_key=ATTR_KEY_CURRENT_LADDER_START_DATE,
-            ),
-            # current ladder remaining kwh
-            CSGEnergySensor(
-                coordinator, ele_account_number, SUFFIX_CURRENT_LADDER_REMAINING_KWH
-            ),
-            # current ladder tariff
-            CSGCostSensor(
-                coordinator, ele_account_number, SUFFIX_CURRENT_LADDER_TARIFF
-            ),
+            # DISABLED: get_month_daily_cost_detail API is broken
+            # # this month's total cost, with extra attributes about daily usage
+            # CSGCostSensor(
+            #     coordinator,
+            #     ele_account_number,
+            #     SUFFIX_THIS_MONTH_COST,
+            #     extra_state_attributes_key=ATTR_KEY_THIS_MONTH_BY_DAY,
+            # ),
+            # DISABLED: get_month_daily_cost_detail API is broken
+            # # current ladder, with extra attributes about start date
+            # CSGLadderStageSensor(
+            #     coordinator,
+            #     ele_account_number,
+            #     SUFFIX_CURRENT_LADDER,
+            #     extra_state_attributes_key=ATTR_KEY_CURRENT_LADDER_START_DATE,
+            # ),
+            # # current ladder remaining kwh
+            # CSGEnergySensor(
+            #     coordinator, ele_account_number, SUFFIX_CURRENT_LADDER_REMAINING_KWH
+            # ),
+            # # current ladder tariff
+            # CSGCostSensor(
+            #     coordinator, ele_account_number, SUFFIX_CURRENT_LADDER_TARIFF
+            # ),
             # last year's total energy, with extra attributes about monthly usage
             CSGEnergySensor(
                 coordinator,
@@ -180,13 +182,14 @@ async def async_setup_entry(
                 SUFFIX_LAST_MONTH_KWH,
                 extra_state_attributes_key=ATTR_KEY_LAST_MONTH_BY_DAY,
             ),
-            # last month's total cost, with extra attributes about daily usage
-            CSGCostSensor(
-                coordinator,
-                ele_account_number,
-                SUFFIX_LAST_MONTH_COST,
-                extra_state_attributes_key=ATTR_KEY_LAST_MONTH_BY_DAY,
-            ),
+            # DISABLED: get_month_daily_cost_detail API is broken
+            # # last month's total cost, with extra attributes about daily usage
+            # CSGCostSensor(
+            #     coordinator,
+            #     ele_account_number,
+            #     SUFFIX_LAST_MONTH_COST,
+            #     extra_state_attributes_key=ATTR_KEY_LAST_MONTH_BY_DAY,
+            # ),
         ]
 
         all_sensors.extend(sensors)
@@ -595,115 +598,139 @@ class CSGCoordinator(DataUpdateCoordinator):
         self, account: CSGElectricityAccount
     ):
         """Update this month's usage, cost and ladder"""
-        # fetch usage and cost in parallel
-        task_fetch_usage = asyncio.create_task(
-            self._async_fetch(
-                self._client.get_month_daily_usage_detail, account, self._this_month_ym
-            )
-        )
-        task_fetch_cost = asyncio.create_task(
-            self._async_fetch(
-                self._client.get_month_daily_cost_detail, account, self._this_month_ym
-            )
+        # DISABLED: get_month_daily_cost_detail API is broken, only usage endpoint is called
+        success, result = await self._async_fetch(
+            self._client.get_month_daily_usage_detail, account, self._this_month_ym
         )
 
-        results = await asyncio.gather(task_fetch_usage, task_fetch_cost)
-
-        (success_usage, result_usage), (success_cost, result_cost) = results
-
-        if success_usage:
-            this_month_kwh_from_usage, this_month_by_day_from_usage = result_usage
+        if success:
+            this_month_kwh_from_usage, this_month_by_day_from_usage = result
         else:
             this_month_kwh_from_usage = STATE_UNAVAILABLE
             this_month_by_day_from_usage = STATE_UNAVAILABLE
 
-        if success_cost:
-            (
-                this_month_cost,
-                this_month_kwh_from_cost,
-                ladder,
-                this_month_by_day_from_cost,
-            ) = result_cost
-            # special processing
-            if this_month_cost is None:
-                this_month_cost = STATE_UNAVAILABLE
-            if this_month_kwh_from_cost is None:
-                this_month_kwh_from_cost = STATE_UNAVAILABLE
-            ladder_stage = (
-                ladder[WF_ATTR_LADDER]
-                if ladder[WF_ATTR_LADDER] is not None
-                else STATE_UNAVAILABLE
-            )
-            ladder_remaining_kwh = (
-                ladder[WF_ATTR_LADDER_REMAINING_KWH]
-                if ladder[WF_ATTR_LADDER_REMAINING_KWH] is not None
-                else STATE_UNAVAILABLE
-            )
-            ladder_tariff = (
-                ladder[WF_ATTR_LADDER_TARIFF]
-                if ladder[WF_ATTR_LADDER_TARIFF] is not None
-                else STATE_UNAVAILABLE
-            )
-            ladder_start_date = (
-                ladder[WF_ATTR_LADDER_START_DATE]
-                if ladder[WF_ATTR_LADDER_START_DATE] is not None
-                else STATE_UNAVAILABLE
-            )
-        else:
-            (
-                this_month_cost,
-                this_month_kwh_from_cost,
-                this_month_by_day_from_cost,
-                ladder_stage,
-                ladder_remaining_kwh,
-                ladder_tariff,
-                ladder_start_date,
-            ) = (
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-            )
-        this_month_by_day, this_month_kwh = self.merge_by_day_data(
-            by_day_from_usage=this_month_by_day_from_usage,
-            kwh_from_usage=this_month_kwh_from_usage,
-            by_day_from_cost=this_month_by_day_from_cost,
-            kwh_from_cost=this_month_kwh_from_cost,
-        )
-
-        if this_month_by_day == STATE_UNAVAILABLE:
+        if this_month_by_day_from_usage == STATE_UNAVAILABLE:
             # need last month's data to update `latest_day` entity
             self._if_update_last_month = True
 
         self._gathered_data[account.account_number][
             SUFFIX_THIS_MONTH_KWH
-        ] = this_month_kwh
-        self._gathered_data[account.account_number][
-            SUFFIX_THIS_MONTH_COST
-        ] = this_month_cost
+        ] = this_month_kwh_from_usage
         self._gathered_data[account.account_number][ATTR_KEY_THIS_MONTH_BY_DAY] = {
-            ATTR_KEY_THIS_MONTH_BY_DAY: this_month_by_day
+            ATTR_KEY_THIS_MONTH_BY_DAY: this_month_by_day_from_usage
         }
-        self._gathered_data[account.account_number][
-            SUFFIX_CURRENT_LADDER
-        ] = ladder_stage
-        self._gathered_data[account.account_number][
-            SUFFIX_CURRENT_LADDER_REMAINING_KWH
-        ] = ladder_remaining_kwh
-        self._gathered_data[account.account_number][
-            SUFFIX_CURRENT_LADDER_TARIFF
-        ] = ladder_tariff
-        self._gathered_data[account.account_number][
-            ATTR_KEY_CURRENT_LADDER_START_DATE
-        ] = {ATTR_KEY_CURRENT_LADDER_START_DATE: ladder_start_date}
+
+        # DISABLED: cost and ladder removed — get_month_daily_cost_detail API is broken
+        # # fetch usage and cost in parallel
+        # task_fetch_usage = asyncio.create_task(
+        #     self._async_fetch(
+        #         self._client.get_month_daily_usage_detail, account, self._this_month_ym
+        #     )
+        # )
+        # task_fetch_cost = asyncio.create_task(
+        #     self._async_fetch(
+        #         self._client.get_month_daily_cost_detail, account, self._this_month_ym
+        #     )
+        # )
+        #
+        # results = await asyncio.gather(task_fetch_usage, task_fetch_cost)
+        #
+        # (success_usage, result_usage), (success_cost, result_cost) = results
+        #
+        # if success_usage:
+        #     this_month_kwh_from_usage, this_month_by_day_from_usage = result_usage
+        # else:
+        #     this_month_kwh_from_usage = STATE_UNAVAILABLE
+        #     this_month_by_day_from_usage = STATE_UNAVAILABLE
+        #
+        # if success_cost:
+        #     (
+        #         this_month_cost,
+        #         this_month_kwh_from_cost,
+        #         ladder,
+        #         this_month_by_day_from_cost,
+        #     ) = result_cost
+        #     # special processing
+        #     if this_month_cost is None:
+        #         this_month_cost = STATE_UNAVAILABLE
+        #     if this_month_kwh_from_cost is None:
+        #         this_month_kwh_from_cost = STATE_UNAVAILABLE
+        #     ladder_stage = (
+        #         ladder[WF_ATTR_LADDER]
+        #         if ladder[WF_ATTR_LADDER] is not None
+        #         else STATE_UNAVAILABLE
+        #     )
+        #     ladder_remaining_kwh = (
+        #         ladder[WF_ATTR_LADDER_REMAINING_KWH]
+        #         if ladder[WF_ATTR_LADDER_REMAINING_KWH] is not None
+        #         else STATE_UNAVAILABLE
+        #     )
+        #     ladder_tariff = (
+        #         ladder[WF_ATTR_LADDER_TARIFF]
+        #         if ladder[WF_ATTR_LADDER_TARIFF] is not None
+        #         else STATE_UNAVAILABLE
+        #     )
+        #     ladder_start_date = (
+        #         ladder[WF_ATTR_LADDER_START_DATE]
+        #         if ladder[WF_ATTR_LADDER_START_DATE] is not None
+        #         else STATE_UNAVAILABLE
+        #     )
+        # else:
+        #     (
+        #         this_month_cost,
+        #         this_month_kwh_from_cost,
+        #         this_month_by_day_from_cost,
+        #         ladder_stage,
+        #         ladder_remaining_kwh,
+        #         ladder_tariff,
+        #         ladder_start_date,
+        #     ) = (
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #     )
+        # this_month_by_day, this_month_kwh = self.merge_by_day_data(
+        #     by_day_from_usage=this_month_by_day_from_usage,
+        #     kwh_from_usage=this_month_kwh_from_usage,
+        #     by_day_from_cost=this_month_by_day_from_cost,
+        #     kwh_from_cost=this_month_kwh_from_cost,
+        # )
+        #
+        # if this_month_by_day == STATE_UNAVAILABLE:
+        #     # need last month's data to update `latest_day` entity
+        #     self._if_update_last_month = True
+        #
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_THIS_MONTH_KWH
+        # ] = this_month_kwh
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_THIS_MONTH_COST
+        # ] = this_month_cost
+        # self._gathered_data[account.account_number][ATTR_KEY_THIS_MONTH_BY_DAY] = {
+        #     ATTR_KEY_THIS_MONTH_BY_DAY: this_month_by_day
+        # }
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_CURRENT_LADDER
+        # ] = ladder_stage
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_CURRENT_LADDER_REMAINING_KWH
+        # ] = ladder_remaining_kwh
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_CURRENT_LADDER_TARIFF
+        # ] = ladder_tariff
+        # self._gathered_data[account.account_number][
+        #     ATTR_KEY_CURRENT_LADDER_START_DATE
+        # ] = {ATTR_KEY_CURRENT_LADDER_START_DATE: ladder_start_date}
 
         self._this_month_update_completed_flag.set()
 
     async def _async_update_last_month_stats(self, account: CSGElectricityAccount):
         """Update last month's usage and cost"""
+        # DISABLED: get_month_daily_cost_detail API is broken, only usage endpoint is called
         if not self._if_update_last_month:
             # original condition, don't need to update last month's data
 
@@ -720,79 +747,96 @@ class CSGCoordinator(DataUpdateCoordinator):
                     SUFFIX_LAST_MONTH_KWH
                 ] = STATE_UPDATE_UNCHANGED
                 self._gathered_data[account.account_number][
-                    SUFFIX_LAST_MONTH_COST
-                ] = STATE_UPDATE_UNCHANGED
-                self._gathered_data[account.account_number][
                     ATTR_KEY_LAST_MONTH_BY_DAY
                 ] = {ATTR_KEY_LAST_MONTH_BY_DAY: STATE_UPDATE_UNCHANGED}
                 return
 
-        # continue to update last month's data
-        # fetch usage and cost in parallel
-        task_fetch_usage = asyncio.create_task(
-            self._async_fetch(
-                self._client.get_month_daily_usage_detail, account, self._last_month_ym
-            )
-        )
-        task_fetch_cost = asyncio.create_task(
-            self._async_fetch(
-                self._client.get_month_daily_cost_detail, account, self._last_month_ym
-            )
+        success, result = await self._async_fetch(
+            self._client.get_month_daily_usage_detail, account, self._last_month_ym
         )
 
-        results = await asyncio.gather(task_fetch_usage, task_fetch_cost)
-
-        (success_usage, result_usage), (success_cost, result_cost) = results
-
-        if success_usage:
-            last_month_kwh_from_usage, last_month_by_day_from_usage = result_usage
+        if success:
+            last_month_kwh_from_usage, last_month_by_day_from_usage = result
         else:
             last_month_kwh_from_usage = STATE_UNAVAILABLE
             last_month_by_day_from_usage = STATE_UNAVAILABLE
 
-        if success_cost:
-            (
-                last_month_cost,
-                last_month_kwh_from_cost,
-                _,  # ladder is discarded
-                last_month_by_day_from_cost,
-            ) = result_cost
-
-            # for last month, it's safe to calculate total kwh from cost
-            if not last_month_cost:
-                last_month_cost = sum(
-                    d[WF_ATTR_CHARGE] for d in last_month_by_day_from_cost
-                )
-            if not last_month_kwh_from_cost:
-                last_month_kwh_from_cost = sum(
-                    d[WF_ATTR_KWH] for d in last_month_by_day_from_cost
-                )
-        else:
-            (
-                last_month_cost,
-                last_month_kwh_from_cost,
-                last_month_by_day_from_cost,
-            ) = (
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-                STATE_UNAVAILABLE,
-            )
-        last_month_by_day, last_month_kwh = self.merge_by_day_data(
-            by_day_from_usage=last_month_by_day_from_usage,
-            kwh_from_usage=last_month_kwh_from_usage,
-            by_day_from_cost=last_month_by_day_from_cost,
-            kwh_from_cost=last_month_kwh_from_cost,
-        )
-
         self._gathered_data[account.account_number][
             SUFFIX_LAST_MONTH_KWH
-        ] = last_month_kwh
-        self._gathered_data[account.account_number][
-            SUFFIX_LAST_MONTH_COST
-        ] = last_month_cost
+        ] = last_month_kwh_from_usage
         self._gathered_data[account.account_number][ATTR_KEY_LAST_MONTH_BY_DAY] = {
-            ATTR_KEY_LAST_MONTH_BY_DAY: last_month_by_day
+            ATTR_KEY_LAST_MONTH_BY_DAY: last_month_by_day_from_usage
         }
+
+        # DISABLED: cost removed — get_month_daily_cost_detail API is broken
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_LAST_MONTH_COST
+        # ] = STATE_UPDATE_UNCHANGED
+        # # fetch usage and cost in parallel
+        # task_fetch_usage = asyncio.create_task(
+        #     self._async_fetch(
+        #         self._client.get_month_daily_usage_detail, account, self._last_month_ym
+        #     )
+        # )
+        # task_fetch_cost = asyncio.create_task(
+        #     self._async_fetch(
+        #         self._client.get_month_daily_cost_detail, account, self._last_month_ym
+        #     )
+        # )
+        #
+        # results = await asyncio.gather(task_fetch_usage, task_fetch_cost)
+        #
+        # (success_usage, result_usage), (success_cost, result_cost) = results
+        #
+        # if success_usage:
+        #     last_month_kwh_from_usage, last_month_by_day_from_usage = result_usage
+        # else:
+        #     last_month_kwh_from_usage = STATE_UNAVAILABLE
+        #     last_month_by_day_from_usage = STATE_UNAVAILABLE
+        #
+        # if success_cost:
+        #     (
+        #         last_month_cost,
+        #         last_month_kwh_from_cost,
+        #         _,  # ladder is discarded
+        #         last_month_by_day_from_cost,
+        #     ) = result_cost
+        #
+        #     # for last month, it's safe to calculate total kwh from cost
+        #     if not last_month_cost:
+        #         last_month_cost = sum(
+        #             d[WF_ATTR_CHARGE] for d in last_month_by_day_from_cost
+        #         )
+        #     if not last_month_kwh_from_cost:
+        #         last_month_kwh_from_cost = sum(
+        #             d[WF_ATTR_KWH] for d in last_month_by_day_from_cost
+        #         )
+        # else:
+        #     (
+        #         last_month_cost,
+        #         last_month_kwh_from_cost,
+        #         last_month_by_day_from_cost,
+        #     ) = (
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #         STATE_UNAVAILABLE,
+        #     )
+        # last_month_by_day, last_month_kwh = self.merge_by_day_data(
+        #     by_day_from_usage=last_month_by_day_from_usage,
+        #     kwh_from_usage=last_month_kwh_from_usage,
+        #     by_day_from_cost=last_month_by_day_from_cost,
+        #     kwh_from_cost=last_month_kwh_from_cost,
+        # )
+        #
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_LAST_MONTH_KWH
+        # ] = last_month_kwh
+        # self._gathered_data[account.account_number][
+        #     SUFFIX_LAST_MONTH_COST
+        # ] = last_month_cost
+        # self._gathered_data[account.account_number][ATTR_KEY_LAST_MONTH_BY_DAY] = {
+        #     ATTR_KEY_LAST_MONTH_BY_DAY: last_month_by_day
+        # }
 
     def _update_latest_day(self, account: CSGElectricityAccount):
         this_month_by_day = self._gathered_data[account.account_number][

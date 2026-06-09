@@ -798,5 +798,6 @@ class CSGClient:
         )
         if resp_data["power"] is not None:
             return float(resp_data["power"])
+        return 0.0
 
     # end high-level api wrappers
